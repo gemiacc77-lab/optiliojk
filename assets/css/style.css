@@ -1295,6 +1295,10 @@ main {
     color: var(--text-gray);
     margin-bottom: 1rem;
 }
+.job-meta i {
+    color: var(--accent-light);
+    margin-right: 8px;
+}
 .job-meta span {
     display: flex;
     align-items: center;
