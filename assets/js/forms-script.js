@@ -3,6 +3,20 @@ function initializeFormHandlers(config) {
     const TURNSTILE_SITEKEY = config.turnstileKey;
     let isFormSubmitted = false;
 
+    // --- بداية دالة إجبار الزر على العمل ---
+    function forceEnableSubmitButton() {
+        const btn = document.getElementById('submitBriefButton');
+        if (btn) {
+            btn.disabled = false;
+            btn.removeAttribute('disabled');
+            btn.classList.remove('sending');
+            btn.style.pointerEvents = 'auto'; // ضمان قابلية النقر
+            btn.style.opacity = '1';
+            btn.textContent = 'Submit Full Brief';
+        }
+    }
+    // --- نهاية دالة إجبار الزر ---
+
     function setupSmartAutoSave() {
         try {
             const form = document.getElementById('projectBriefForm');
@@ -152,18 +166,31 @@ function initializeFormHandlers(config) {
 
     document.addEventListener('DOMContentLoaded', function() {
         setupSmartAutoSave();
+        
+        // استدعاء دالة إجبار الزر فوراً عند التحميل
+        forceEnableSubmitButton();
+        
+        // واستدعائها مرة أخرى بعد ثانية للتأكيد (في حال تأخر تحميل شيء ما)
+        setTimeout(forceEnableSubmitButton, 1000);
 
         const formSections = document.querySelectorAll('.form-section');
         const progressSteps = document.querySelectorAll('.progress-step');
         const nextButtons = document.querySelectorAll('.btn-next');
         const prevButtons = document.querySelectorAll('.btn-prev');
-        const submitButton = document.querySelector('.btn-submit');
+        const submitButton = document.querySelector('.btn-submit'); // Note: This is usually .btn-submit class
         
-        // Fix: Force enable submit button on load to prevent browser caching disabled state
-        if (submitButton) {
-            submitButton.disabled = false;
-            submitButton.classList.remove('sending');
-            submitButton.textContent = 'Submit Full Brief';
+        // Ensure the ID based selection works for the specific submit button
+        const realSubmitBtn = document.getElementById('submitBriefButton');
+        if(realSubmitBtn) {
+            realSubmitBtn.addEventListener('click', (e) => {
+                // التحقق اليدوي عند الضغط بدلاً من الاعتماد على form submit فقط
+                // هذا يضمن أن الزر يستجيب حتى لو كان الفورم يعتقد أنه غير صالح
+                if(fileDataTransfer.files.length === 0) {
+                     e.preventDefault(); // Stop submission if no file
+                     showNotification('Please upload your ZIP file before submitting.', 'error');
+                     return;
+                }
+            });
         }
 
         const form = document.getElementById('projectBriefForm');
@@ -273,6 +300,9 @@ function initializeFormHandlers(config) {
                 fileValidationMessage.classList.remove('show');
             }
             fileUploadWrapper.style.borderColor = '';
+            
+            // التأكد من تفعيل الزر بعد رفع الملف
+            forceEnableSubmitButton();
         }
         
         function showFilePreview(file) {
@@ -356,6 +386,11 @@ function initializeFormHandlers(config) {
                     targetTitle.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
             }, 200);
+            
+            // في الصفحة الأخيرة، تأكد من تفعيل الزر دائماً
+            if (currentSection === 4 || currentSection === formSections.length - 1) {
+                forceEnableSubmitButton();
+            }
         }
         
         function updateFormDisplay() {
@@ -367,8 +402,12 @@ function initializeFormHandlers(config) {
                 step.classList.toggle('active', index === currentSection);
                 step.classList.toggle('completed', isCompleted);
             });
+            // العرض الشرطي للزر، لكن بدون تحكم في disabled
             if (currentSection === formSections.length - 1) {
-                if(submitButton) submitButton.style.display = 'block';
+                if(submitButton) {
+                    submitButton.style.display = 'block';
+                    forceEnableSubmitButton();
+                }
             } else {
                 if(submitButton) submitButton.style.display = 'none';
             }
@@ -618,7 +657,6 @@ function initializeFormHandlers(config) {
                          fileValidationMessage.textContent = 'ZIP file is required';
                          fileValidationMessage.className = 'validation-message error show';
                      }
-                     // Force highlight the upload box
                      if(fileUploadWrapper) {
                          fileUploadWrapper.style.borderColor = 'var(--error-color)';
                          gsap.to(fileUploadWrapper, { x: -10, duration: 0.1, repeat: 3, yoyo: true, onComplete: () => gsap.set(fileUploadWrapper, { x: 0 }) });
@@ -672,12 +710,11 @@ function initializeFormHandlers(config) {
                     return;
                 }
 
-                // 3. Check Turnstile specifically
+                // 3. Check Turnstile
                 const turnstileResponse = document.querySelector('[name="cf-turnstile-response"]');
                 if (!turnstileResponse || !turnstileResponse.value) {
                     formLoading.classList.remove('active');
                     showNotification('Please check the security box (CAPTCHA) below.', 'error');
-                    // Scroll to Turnstile
                     const turnstileContainer = document.querySelector('.cf-turnstile');
                     if(turnstileContainer) {
                          turnstileContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -690,7 +727,7 @@ function initializeFormHandlers(config) {
                 if(submitButton) {
                    submitButton.textContent = 'Uploading ZIP File...';
                    submitButton.classList.add('sending');
-                   submitButton.disabled = true;
+                   submitButton.disabled = true; // نغلق الزر فقط الآن عند بدء الإرسال الفعلي
                 }
                 try {
                     const files = fileDataTransfer.files;
@@ -759,10 +796,13 @@ function initializeFormHandlers(config) {
                 } catch (err) {
                     formLoading.classList.remove('active');
                     showNotification('Submission error: ' + err.message, 'error');
+                    
+                    // إعادة تفعيل الزر في حالة الفشل
                     if(submitButton) {
                         submitButton.textContent = 'Submit Full Brief';
                         submitButton.classList.remove('sending');
                         submitButton.disabled = false;
+                        submitButton.removeAttribute('disabled');
                     }
                     uploadProgressContainer.style.display = 'none';
                 }
