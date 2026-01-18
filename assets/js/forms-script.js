@@ -1,7 +1,140 @@
 function initializeFormHandlers(config) {
     const SCRIPT_URL = config.scriptUrl;
     const TURNSTILE_SITEKEY = config.turnstileKey;
-    
+    let isFormSubmitted = false;
+
+    function setupSmartAutoSave() {
+        try {
+            const form = document.getElementById('projectBriefForm');
+            if (!form) return;
+
+            const storagePrefix = 'optiline_smart_' + window.location.pathname + '_';
+            
+            let statusDiv = document.getElementById('autosave-indicator');
+            if (!statusDiv) {
+                statusDiv = document.createElement('div');
+                statusDiv.id = 'autosave-indicator';
+                statusDiv.style.cssText = 'position: fixed; bottom: 20px; right: 20px; background: rgba(25, 25, 35, 0.95); color: #fff; padding: 10px 20px; border-radius: 50px; font-size: 12px; font-family: "Inter", sans-serif; opacity: 0; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); z-index: 99999; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 4px 20px rgba(0,0,0,0.4); display: flex; align-items: center; gap: 10px; pointer-events: none;';
+                statusDiv.innerHTML = '<div style="width: 8px; height: 8px; background: #10b981; border-radius: 50%; box-shadow: 0 0 10px #10b981;"></div><span id="autosave-text" style="font-weight: 500; letter-spacing: 0.5px;">Draft Saved</span>';
+                document.body.appendChild(statusDiv);
+            }
+
+            function showSavedStatus(type) {
+                if (isFormSubmitted) return;
+                const textSpan = statusDiv.querySelector('#autosave-text');
+                const dot = statusDiv.querySelector('div');
+                
+                if (type === 'restored') {
+                    dot.style.background = '#a855f7';
+                    dot.style.boxShadow = '0 0 10px #a855f7';
+                    textSpan.textContent = 'Data Restored';
+                } else {
+                    dot.style.background = '#10b981';
+                    dot.style.boxShadow = '0 0 10px #10b981';
+                    textSpan.textContent = 'Draft Saved';
+                }
+
+                statusDiv.style.opacity = '1';
+                setTimeout(() => { 
+                    statusDiv.style.opacity = '0';
+                }, 2000);
+            }
+
+            const saveFieldImmediately = (input) => {
+                if (isFormSubmitted) return;
+                if (!input.name || input.type === 'file' || input.type === 'hidden') return;
+                
+                const key = storagePrefix + input.name;
+                let valueToSave = input.value;
+
+                if (input.type === 'checkbox') {
+                    valueToSave = input.checked ? 'true' : '';
+                } else if (input.type === 'radio') {
+                    if (input.checked) valueToSave = input.value;
+                    else return; 
+                }
+
+                localStorage.setItem(key, valueToSave);
+            };
+
+            const inputs = form.querySelectorAll('input:not([type="file"]):not([type="hidden"]), textarea, select');
+            let dataRestored = false;
+
+            inputs.forEach(input => {
+                const key = storagePrefix + input.name;
+                const savedValue = localStorage.getItem(key);
+                
+                if (savedValue !== null && savedValue !== undefined) {
+                    if (input.type === 'checkbox') {
+                        if (savedValue === 'true') {
+                            input.checked = true;
+                            dataRestored = true;
+                        }
+                    } else if (input.type === 'radio') {
+                        if (input.value === savedValue) {
+                            input.checked = true;
+                            dataRestored = true;
+                        }
+                    } else if (input.value !== savedValue) {
+                        input.value = savedValue;
+                        dataRestored = true;
+                    }
+                    
+                    if (dataRestored && input.value) {
+                        const formGroup = input.closest('.form-group');
+                        if (formGroup) {
+                            formGroup.classList.remove('error');
+                            formGroup.classList.add('success');
+                        }
+                    }
+                }
+            });
+
+            if (dataRestored) {
+                showSavedStatus('restored');
+            }
+
+            let saveTimeout;
+            const handleInput = function(e) {
+                if (isFormSubmitted) return;
+                clearTimeout(saveTimeout);
+                saveTimeout = setTimeout(() => {
+                    saveFieldImmediately(e.target);
+                    showSavedStatus('saved');
+                }, 500);
+            };
+
+            form.addEventListener('input', handleInput);
+            form.addEventListener('change', (e) => {
+                if (isFormSubmitted) return;
+                saveFieldImmediately(e.target);
+                showSavedStatus('saved');
+            });
+
+            window.addEventListener('beforeunload', () => {
+                if (!isFormSubmitted) {
+                    inputs.forEach(input => {
+                        saveFieldImmediately(input);
+                    });
+                }
+            });
+
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    function clearSmartAutoSave() {
+         const storagePrefix = 'optiline_smart_' + window.location.pathname + '_';
+         Object.keys(localStorage).forEach(key => {
+             if (key.startsWith(storagePrefix)) {
+                 localStorage.removeItem(key);
+             }
+         });
+         const statusDiv = document.getElementById('autosave-indicator');
+         if(statusDiv) statusDiv.style.display = 'none';
+    }
+
     (function populateHiddenFields() {
         try {
             const urlParams = new URLSearchParams(window.location.search);
@@ -14,12 +147,12 @@ function initializeFormHandlers(config) {
             }
             const marketerRef = localStorage.getItem('optiline_marketer_ref');
             if(marketerRef) document.getElementById('marketerField').value = marketerRef;
-        } catch (e) {
-            console.warn('Error populating hidden fields', e);
-        }
+        } catch (e) {}
     })();
 
     document.addEventListener('DOMContentLoaded', function() {
+        setupSmartAutoSave();
+
         const formSections = document.querySelectorAll('.form-section');
         const progressSteps = document.querySelectorAll('.progress-step');
         const nextButtons = document.querySelectorAll('.btn-next');
@@ -34,7 +167,8 @@ function initializeFormHandlers(config) {
         const fileDataTransfer = new DataTransfer();
 
         setTimeout(() => {
-            document.querySelector('.project-brief-form').classList.add('loaded');
+            const briefForm = document.querySelector('.project-brief-form');
+            if(briefForm) briefForm.classList.add('loaded');
         }, 500);
 
         updateFormDisplay();
@@ -205,16 +339,16 @@ function initializeFormHandlers(config) {
         }
         
        function navigateToSection(sectionIndex) {
-    currentSection = sectionIndex;
-    updateFormDisplay();
-    setTimeout(() => {
-        const targetTitle = document.getElementById('step-title-' + currentSection);
-        if (targetTitle) {
-            targetTitle.style.scrollMarginTop = "140px"; 
-            targetTitle.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            currentSection = sectionIndex;
+            updateFormDisplay();
+            setTimeout(() => {
+                const targetTitle = document.getElementById('step-title-' + currentSection);
+                if (targetTitle) {
+                    targetTitle.style.scrollMarginTop = "140px"; 
+                    targetTitle.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }, 200);
         }
-    }, 200);
-}
         
         function updateFormDisplay() {
             formSections.forEach((section, index) => {
@@ -226,9 +360,9 @@ function initializeFormHandlers(config) {
                 step.classList.toggle('completed', isCompleted);
             });
             if (currentSection === formSections.length - 1) {
-                submitButton.style.display = 'block';
+                if(submitButton) submitButton.style.display = 'block';
             } else {
-                submitButton.style.display = 'none';
+                if(submitButton) submitButton.style.display = 'none';
             }
         }
         
@@ -241,17 +375,35 @@ function initializeFormHandlers(config) {
             let isValid = true;
             let firstInvalidField = null;
             const requiredInputs = currentSectionElement.querySelectorAll('input[required], textarea[required], select[required]');
+            
             requiredInputs.forEach(input => {
                 const formGroup = input.closest('.form-group');
                 const validationMessage = formGroup.querySelector('.validation-message');
+                let isInputValid = true;
+
                 if (!input.value.trim()) {
+                    isInputValid = false;
+                }
+                
+                if (input.type === 'email' && input.value.trim()) {
+                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    if (!emailRegex.test(input.value.trim())) {
+                        isInputValid = false;
+                        if (validationMessage) {
+                            validationMessage.textContent = 'Please enter a valid email address';
+                        }
+                    }
+                }
+
+                if (!isInputValid) {
                     isValid = false;
                     formGroup.classList.add('error');
                     formGroup.classList.remove('success');
-                    if (validationMessage) {
-                        validationMessage.textContent = 'This field is required';
-                        validationMessage.className = 'validation-message error show';
+                    if (validationMessage && !validationMessage.textContent.includes('valid email')) {
+                         validationMessage.textContent = 'This field is required';
                     }
+                    if (validationMessage) validationMessage.className = 'validation-message error show';
+                    
                     gsap.to(input, {
                         x: -10,
                         duration: 0.1,
@@ -281,6 +433,7 @@ function initializeFormHandlers(config) {
                     }
                 }
             });
+
             if (currentSection === 4 && fileDataTransfer.files.length === 0) {
                 isValid = false;
                 if (fileValidationMessage) {
@@ -323,6 +476,12 @@ function initializeFormHandlers(config) {
             for (let i = 0; i < requiredInputs.length; i++) {
                 if (!requiredInputs[i].value.trim()) {
                     return false;
+                }
+                if (requiredInputs[i].type === 'email') {
+                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                    if (!emailRegex.test(requiredInputs[i].value.trim())) {
+                        return false;
+                    }
                 }
             }
             if (sectionIndex === 4 && fileDataTransfer.files.length === 0) {
@@ -410,7 +569,6 @@ function initializeFormHandlers(config) {
                     });
                     xhr.addEventListener('error', () => {
                         if (xhr.status === 0) {
-                            console.log("Likely CORS error (False Positive), but file is likely uploaded.");
                             updateUploadProgress(100);
                             resolve(`Uploaded (warn): ${file.name}`);
                         } else {
@@ -421,7 +579,6 @@ function initializeFormHandlers(config) {
                     xhr.setRequestHeader('Content-Type', file.type);
                     xhr.send(file);
                 } catch (error) {
-                    console.error('Upload error for file:', file.name, error);
                     reject(error);
                 }
             });
@@ -438,7 +595,6 @@ function initializeFormHandlers(config) {
         }
         
         window.javascriptCallback = function(token) {
-            console.log('Turnstile verified');
         }
         
         if (form) {
@@ -446,29 +602,28 @@ function initializeFormHandlers(config) {
                 e.preventDefault();
                 formLoading.classList.add('active');
                 let allSectionsValid = true;
-                let errorMessage = '';
+                
                 for (let i = 0; i < formSections.length; i++) {
                     const sectionElement = formSections[i];
                     const requiredInputs = sectionElement.querySelectorAll('input[required], textarea[required], select[required]');
                     for (let j = 0; j < requiredInputs.length; j++) {
                         if (!requiredInputs[j].value.trim()) {
                             allSectionsValid = false;
-                            const fieldLabel = requiredInputs[j].closest('.form-group').querySelector('label').textContent.replace('*', '').trim();
-                            if (!errorMessage.includes(`Section ${i}: ${fieldLabel}`)) {
-                                errorMessage += (errorMessage ? '\n' : '') + `Section ${i}: ${fieldLabel}`;
+                        }
+                        if (requiredInputs[j].type === 'email') {
+                            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                            if (!emailRegex.test(requiredInputs[j].value.trim())) {
+                                allSectionsValid = false;
                             }
                         }
                     }
                     if (i === 4 && fileDataTransfer.files.length === 0) {
                         allSectionsValid = false;
-                        if (!errorMessage.includes('Section 4: Upload Your Assets')) {
-                            errorMessage += (errorMessage ? '\n' : '') + 'Section 4: Upload Your Assets';
-                        }
                     }
                 }
                 if (!allSectionsValid) {
                     formLoading.classList.remove('active');
-                    showNotification(`Please fill in all required fields before submitting.`, 'error');
+                    showNotification(`Please fill in all required fields correctly.`, 'error');
                     for (let i = 0; i < formSections.length; i++) {
                         const sectionElement = formSections[i];
                         const requiredInputs = sectionElement.querySelectorAll('input[required], textarea[required], select[required]');
@@ -477,6 +632,13 @@ function initializeFormHandlers(config) {
                             if (!requiredInputs[j].value.trim()) {
                                 sectionHasError = true;
                                 break;
+                            }
+                            if (requiredInputs[j].type === 'email') {
+                                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                                if (!emailRegex.test(requiredInputs[j].value.trim())) {
+                                    sectionHasError = true;
+                                    break;
+                                }
                             }
                         }
                         if (sectionHasError || (i === 4 && fileDataTransfer.files.length === 0)) {
@@ -493,9 +655,11 @@ function initializeFormHandlers(config) {
                     return;
                 }
                 const submitButton = document.getElementById('submitBriefButton');
-                submitButton.textContent = 'Uploading ZIP File...';
-                submitButton.classList.add('sending');
-                submitButton.disabled = true;
+                if(submitButton) {
+                   submitButton.textContent = 'Uploading ZIP File...';
+                   submitButton.classList.add('sending');
+                   submitButton.disabled = true;
+                }
                 try {
                     const files = fileDataTransfer.files;
                     let uploadedLinksLog = "";
@@ -512,7 +676,6 @@ function initializeFormHandlers(config) {
                                 fileItem.style.background = 'transparent';
                             }
                         } catch (uploadErr) {
-                            console.error(`Failed to upload ${file.name}:`, uploadErr);
                             uploadedLinksLog += `Failed: ${file.name} - ${uploadErr.message}\n`;
                             const fileItem = document.getElementById('zip-file-item');
                             if (fileItem) {
@@ -525,7 +688,7 @@ function initializeFormHandlers(config) {
                     } else {
                         uploadedLinksLog = "No files selected.";
                     }
-                    submitButton.textContent = 'Sending Data...';
+                    if(submitButton) submitButton.textContent = 'Sending Data...';
                     const formData = new FormData(form);
                     const dataObj = {};
                     formData.forEach((value, key) => dataObj[key] = value);
@@ -538,6 +701,9 @@ function initializeFormHandlers(config) {
                     });
                     const result = await response.json();
                     if (result.status === 'ok') {
+                        isFormSubmitted = true;
+                        clearSmartAutoSave();
+
                         formLoading.classList.remove('active');
                         form.style.display = 'none';
                         const successMsg = document.getElementById('successMessage');
@@ -559,12 +725,13 @@ function initializeFormHandlers(config) {
                         throw new Error(result.message || 'Unknown error.');
                     }
                 } catch (err) {
-                    console.error('Submission error:', err);
                     formLoading.classList.remove('active');
                     showNotification('Submission error: ' + err.message, 'error');
-                    submitButton.textContent = 'Submit Full Brief';
-                    submitButton.classList.remove('sending');
-                    submitButton.disabled = false;
+                    if(submitButton) {
+                        submitButton.textContent = 'Submit Full Brief';
+                        submitButton.classList.remove('sending');
+                        submitButton.disabled = false;
+                    }
                     uploadProgressContainer.style.display = 'none';
                 }
             });
@@ -607,14 +774,16 @@ function initializeFormHandlers(config) {
             emailInput.addEventListener('blur', function() {
                 const formGroup = this.closest('.form-group');
                 const validationMessage = formGroup.querySelector('.validation-message');
-                if (this.value && !isValidEmail(this.value)) {
+                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                
+                if (this.value && !emailRegex.test(this.value)) {
                     formGroup.classList.add('error');
                     formGroup.classList.remove('success');
                     if (validationMessage) {
                         validationMessage.textContent = 'Please enter a valid email address';
                         validationMessage.className = 'validation-message error show';
                     }
-                } else if (this.value && isValidEmail(this.value)) {
+                } else if (this.value && emailRegex.test(this.value)) {
                     formGroup.classList.remove('error');
                     formGroup.classList.add('success');
                     if (validationMessage) {
